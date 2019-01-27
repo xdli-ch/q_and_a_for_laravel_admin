@@ -53,12 +53,12 @@ xxx.blade.php 中用到了 laravel-admin 自带的 Bootstrap3 的 标签tabs组�
 文件中的标签tabs组件相应代码。
 
 ## 访问
-#### web
+### web
 **【试卷列表】**： /admin/q_and_a  
 **【创建试卷】**： /admin/q_and_a/create  
 **【用户答题】**： /admin/user_qa
 
-#### api
+### api
 **【获取试卷类别】**：/q_and_a/papers/type  get请求  
 **【获取试卷等级】**：/q_and_a/level  get请求  
 **【筛选查询试卷】**：/q_and_a/search  get请求  
