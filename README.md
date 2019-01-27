@@ -67,12 +67,10 @@ type //试卷类别   <可选>
 train_level //试卷等级 <可选>     
 title //试卷标题 <可选，支持模糊匹配>`
   
-**【获取试卷详情】**：  
-    /q_and_a/paper/(paper_id) get请求   
+**【获取试卷详情】**：/q_and_a/paper/(paper_id) get请求   
 `说明: 如果参数paper_id 为空的话，默认返回试卷库中的status为1的第一张试卷`  
 
-**【用户提交答卷(交卷)】**:   
-/q_and_a/save_train  post请求    
+**【用户提交答卷(交卷)】**: /q_and_a/save_train  post请求    
 `传参:  
 paper_id   //试卷 id  
 all_use_time   //用时 s  
