@@ -1,0 +1,31 @@
+<?php
+
+namespace App\Models\Q_And_A;
+
+use Illuminate\Database\Eloquent\Model;
+use App\User;
+
+class UserTrain extends Model
+{
+    protected $fillable = ['user_id','paper_id','all_use_time','answers','questions_count','right_question_ids','right_count','error_question_ids','error_count','right_ratio'];
+
+    protected $table = 'q_a_user_trains';
+
+    protected $appends = [];
+
+    protected $hidden = [];
+
+    public function getAnswersAttribute($value)
+    {
+        $answerArray = json_decode($value,true);
+        return $answerArray;
+    }
+
+    public function user(){
+        return $this->belongsTo(User::class,'user_id','id');
+    }
+
+    public function paper(){
+        return $this->belongsTo(Paper::class,'paper_id','id');
+    }
+}

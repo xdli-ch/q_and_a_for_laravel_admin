@@ -1,0 +1,11 @@
+
+/*
+ * 用户答题
+ * */
+Route::group(['middleware' => ['auth:api'], 'prefix' => 'q_and_a'], function () {
+    Route::get('papers/type', 'Api\Q_And_A\Train@getType');//试卷类别
+    Route::get('papers/level', 'Api\Q_And_A\Train@getLevel');//试卷等级
+    Route::get('papers/search', 'Api\Q_And_A\Train@search');//查询试卷
+    Route::get('paper/{id?}', 'Api\Q_And_A\Train@viewPaper')->where('id','[0-9]+');//获取试卷
+    Route::post('save_train', 'Api\Q_And_A\Train@saveUserTrains');//用户提交答卷(交卷)
+});

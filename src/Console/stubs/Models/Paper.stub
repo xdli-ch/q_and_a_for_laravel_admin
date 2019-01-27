@@ -1,0 +1,67 @@
+<?php
+
+namespace App\Models\Q_And_A;
+
+use Illuminate\Database\Eloquent\Model;
+
+class Paper extends Model
+{
+    protected $fillable = ['title','title_md5','introduce','can_use_time','type','train_level','status','creater_id','updater_id'];
+
+    protected $table = 'q_a_papers';
+
+    protected $appends = ['status_alias','train_level_alias','type_alias'];
+
+    protected $hidden = [];
+
+    public function questions(){
+        return $this->hasMany(Question::class,'paper_id');
+    }
+
+    //翻译 上线状态
+    public function getStatusAliasAttribute()
+    {
+        $status = $this->attributes['status'];
+        if($status == self::DISABLE){
+            return '未上线';
+        }elseif($status == self::ENABLE){
+            return '在线';
+        }else{
+            return '未上线';
+        }
+    }
+
+    //翻译 试卷类别
+    public function getTypeAliasAttribute(){
+        $type = $this->attributes['type'];
+        $type_alias = $type?$type:'无';
+        foreach (config('q_and_a.type',[]) as $key => $value){
+            if ($key == $type){
+                $type_alias = $value;
+                break;
+            }
+        }
+
+        return $type_alias;
+    }
+
+    //翻译 难度级别
+    public function getTrainLevelAliasAttribute(){
+        $train_level = $this->attributes['train_level'];
+        $train_level_alias = $train_level?$train_level:'无';
+        foreach (config('q_and_a.train_level',[]) as $key => $value){
+            if ($key == $train_level){
+                $train_level_alias = $value;
+                break;
+            }
+        }
+
+        return $train_level_alias;
+    }
+
+    /*
+     * 使能转态
+     * */
+    const DISABLE = -1;  //未上线
+    const ENABLE = 1; //在线
+}

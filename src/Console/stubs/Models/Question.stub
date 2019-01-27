@@ -1,0 +1,21 @@
+<?php
+
+namespace App\Models\Q_And_A;
+
+use Illuminate\Database\Eloquent\Model;
+
+class Question extends Model
+{
+    protected $fillable = ['paper_id','title','title_md5','type','options','right_option_keys','creater_id','updater_id'];
+
+    protected $table = 'q_a_questions';
+
+    protected $appends = [];
+
+    protected $hidden = ['right_option_keys'];
+
+    public function getOptionsAttribute($value)
+    {
+        return json_decode($value,true);
+    }
+}

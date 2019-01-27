@@ -1,0 +1,630 @@
+<?php
+
+namespace App\Admin\Controllers\Q_And_A;
+
+use Encore\Admin\Layout\Content;
+use Illuminate\Routing\Controller;
+use Illuminate\Http\Request;
+use App\Models\Q_And_A\Paper;
+use App\Models\Q_And_A\Question;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
+
+use Encore\Admin\Controllers\HasResourceActions;
+use Encore\Admin\Form;
+use Encore\Admin\Grid;
+use Encore\Admin\Show;
+
+class Q_And_AController extends Controller
+{
+    use HasResourceActions;
+
+    public function index(Content $content)
+    {
+        return $content
+            ->header('试卷管理')
+            ->breadcrumb(
+                ['text' => '试卷管理']
+            )
+            ->body($this->grid());
+    }
+
+    /**
+     * Make a grid builder.
+     *
+     * @return Grid
+     */
+    protected function grid()
+    {
+        $grid = new Grid(new Paper);
+
+        $grid->disableExport();//禁用导出数据按钮
+
+        $grid->id('ID');
+        $grid->title('标题');
+
+        if(count(config('q_and_a.type')) > 0) {
+            $grid->type_alias('类别');
+        }
+
+        if(count(config('q_and_a.train_level')) > 0){
+            $grid->train_level_alias('等级');
+        }
+
+        $grid->status('上线状态')->using([ -1 => '未上线', 1 => '在线']);
+        $grid->questions_count('问题个数');
+        $grid->can_use_time('考试时长');
+        $grid->updated_at('编辑时间');
+        $grid->model()->orderBy('updated_at', 'desc');
+        $grid->actions(function ($actions) {
+            $actions->disableView();
+        });
+
+        $grid->filter(function ($filter) {
+
+            // 去掉默认的id过滤器
+            $filter->disableIdFilter();
+
+            $filter->column(1/2, function ($filter) {
+                $filter->like('title','试卷标题');
+            });
+
+            $filter->column(1/2, function ($filter) {
+                $filter->where(function ($query) {
+                    switch ($this->input) {
+                        case '1':
+                            $query->where('questions_count','>', 0);
+                            break;
+                        case '-1':
+                            $query->where('questions_count','=',0);
+                            break;
+                    }
+                }, '答题关联', 'questions_count')->select([
+                    '0' => '全部',
+                    '1' => '有关联',
+                    '-1' => '无关联',
+                ]);
+            });
+
+            $filter->column(1/2, function ($filter) {
+
+                $filter->where(function ($query) {
+                    if($this->input == Paper::DISABLE) {
+                        $query->where('status','=', Paper::DISABLE);
+                    }elseif($this->input == Paper::ENABLE){
+                        $query->where('status','=',Paper::ENABLE);
+                    }
+                }, '上线状态', 'status')->select([
+                    '0' => '全部',
+                    Paper::DISABLE => '未上线',
+                    Paper::ENABLE => '在线',
+                ]);
+            });
+
+            if(count(config('q_and_a.type')) > 0) {
+                $filter->column(1/2, function ($filter) {
+
+                    $filter->where(function ($query) {
+                        if($this->input !== '0') {
+                            $query->where('type','=', $this->input);
+                        }
+                    }, '试卷类型', 'type')->select(
+                        array_merge([
+                            '0' => '全部',
+                        ],config('q_and_a.type'))
+                    );
+                });
+
+            }
+
+            if(count(config('q_and_a.train_level')) > 0){
+                $filter->column(1/2, function ($filter) {
+
+                    $filter->where(function ($query) {
+                        if($this->input !== '0') {
+                            $query->where('train_level','=', $this->input);
+                        }
+                    }, '试卷等级', 'train_level')->select(
+                        array_merge([
+                            '0' => '全部',
+                        ],config('q_and_a.train_level'))
+                    );
+                });
+
+            }
+
+        });
+
+        return $grid;
+    }
+
+    /**
+     * Show the form for creating a new resource.
+     *
+     */
+    public function create(Content $content)
+    {
+        $type = config('q_and_a.type',[]);//试卷类别
+        $train_level= config('q_and_a.train_level',[]);//难度级别
+        $status= [
+            Paper::DISABLE => '下线',
+            Paper::ENABLE => '上线',
+        ];//上线状态
+        $can_use_time = config('q_and_a.default_can_use_time',60);//试卷默认的考试可用时长(分钟)，0 表示无时间限定
+        $questions_count = config('q_and_a.default_questions_count',1) ;//试卷初始展示时默认的问题数
+        $question_options = config('q_and_a.question_option',['a','b','c','d']) ;
+        if(empty($question_options) || count($question_options) < 2){
+            abort(500);//请配置 问题的选项
+        }
+
+        $box = new Box('创建');
+        $box->style('info');
+        $box->tools([
+            '<div class="btn-group pull-right" style="margin-right: 5px"><a href="'.route('q_and_a.index').'" class="btn btn-sm btn-default" title="列表"><i class="fa fa-list"></i><span class="hidden-xs">&nbsp;列表</span></a></div>',
+        ]);
+        $box->content(view('q_and_a::create',[
+            'paper_type'=>$type,
+            'train_level'=>$train_level,
+            'status'=>$status,
+            'can_use_time' =>$can_use_time,
+            'questions_count'=>$questions_count,
+            'question_options' => $question_options,
+        ]));
+
+        return $content
+            ->header('试卷创建')
+            ->breadcrumb(
+                ['text' => '试卷管理', 'url' => '/q_and_a'],
+                ['text' => '试卷创建']
+            )
+            ->body($box);
+    }
+
+    /**
+     * Store a newly created resource in storage.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Http\Response
+     */
+    public function store(Request $request)
+    {
+        /*
+         * 对试卷 表单进行验证
+         * */
+        $paper_title = $request->input('paper_title','');
+        $paper_title_md5 = md5($paper_title);
+        $paperData = array_merge(
+            $request->all(),
+            ['title_md5'=>$paper_title_md5]
+        );
+        $paperValidator = \Validator::make($paperData,$this->paperRules(), $this->paperValidationErrorMessages());
+        if ($paperValidator->fails()) {
+            return back()->withErrors($paperValidator)->withInput()->with('paper_active',1);  //返回一次性错误
+        }
+
+        /*
+         * 对问题 表单进行验证
+         * */
+        //基本验证
+        $questionValidator = \Validator::make($request->all(),$this->questionRules(), $this->questionValidationErrorMessages());
+        //自定义验证
+        $questionValidator = $this->customValidate($request,$questionValidator);
+        if ($questionValidator->fails()) {
+            return back()->withErrors($questionValidator)->withInput()->with('question_active',1);  //返回一次性错误
+        }
+
+        //将试卷写入数据库
+        $paperData = $request->all();
+        $paperData['title'] = $request->input('paper_title');
+        $paperData['title_md5'] = $paper_title_md5;
+        $paperData['introduce'] = $request->input('paper_introduce');
+        $paperData['type'] = $request->input('paper_type',0);
+        $paperData['train_level'] = $request->input('train_level',0);
+        $current_user = \Auth::user();
+        $paperData['creater_id'] = $current_user?$current_user->id:0;
+        $paperData['updater_id'] = $current_user?$current_user->id:0;
+
+        try{
+            $paperObj = Paper::create($paperData);
+        }catch (\Exception $e){
+            return back()->withInput()->with('paper_error',$e->getMessage());
+        }
+        $paperId = $paperObj->id;
+
+        //将问题写入数据库
+        $questionData = [];
+        $questionItems = $request->input('question')??[]??[];
+        $questionCount = 0; //记录有效题目的数量
+        foreach ($questionItems as $qItem){
+            $questionTitle = $qItem['title'];
+            if(!empty($questionTitle)){
+                $questionCount++;
+                $questionData['paper_id'] = $paperId;
+                $questionData['title'] = $questionTitle;
+                $questionData['title_md5'] = md5($questionTitle);
+                $questionData['options'] = json_encode($qItem['option']);
+                if(is_array($qItem['right_options'])){//多选题，复选框
+                    $questionData['right_option_keys'] = implode(',',$qItem['right_options']);
+                    $questionData['type'] = 2;
+                }else{//单选题，复选框
+                    $questionData['right_option_keys'] = $qItem['right_options'];
+                    $questionData['type'] = 1;
+                }
+                try{
+                    Question::create($questionData);
+                }catch (\Exception $e){
+                    return back()->withInput()->with('question_error',$e->getMessage());
+                }
+            }
+        }
+
+        //将$questions_count 即：试卷的有效题目的数量 记录到试卷记录中去
+        $paperObj->questions_count = $questionCount;
+        $paperObj->save();
+
+        admin_toastr(trans('admin.save_succeeded'));
+
+        return redirect(route('q_and_a.index'));
+    }
+
+    /**
+     * Display the specified resource.
+     *
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
+    public function show($id)
+    {
+        return null;
+    }
+
+    /**
+     * Show the form for editing the specified resource.
+     *
+     * @param  int  $id
+     */
+    public function edit(Content $content,$id)
+    {
+        $paper = Paper::where('id',$id)->with('questions')->withCount('questions')->first();
+        $type = config('q_and_a.type',[]);//试卷类别
+        $train_level= config('q_and_a.train_level',[]);//难度级别
+        $status= [
+            Paper::DISABLE => '下线',
+            Paper::ENABLE => '上线',
+        ];//上线状态
+        $questions_count = ($paper->questions_count > 0)?$paper->questions_count:1 ;// 默认显示的问题数量
+        $question_options = config('q_and_a.question_option',['a','b','c','d']) ;
+        $can_use_time = config('q_and_a.default_can_use_time',60);//试卷默认的考试可用时长(分钟)，0 表示无时间限定
+
+        if(empty($question_options) || count($question_options) < 2){
+            abort(500);//请配置 问题的选项
+        }
+
+        $box = new Box('编辑');
+        $box->style('info');
+        $box->tools([
+            '<div class="btn-group pull-right" style="margin-right: 5px"><a href="'.route('q_and_a.index').'" class="btn btn-sm btn-default" title="列表"><i class="fa fa-list"></i><span class="hidden-xs">&nbsp;列表</span></a></div>',
+        ]);
+        $box->content(view('q_and_a::edit',[
+            'paper'=>$paper,
+            'paper_type'=>$type,
+            'train_level'=>$train_level,
+            'status'=>$status,
+            'questions_count'=>$questions_count,
+            'can_use_time' =>$can_use_time,
+            'question_options' => $question_options,
+        ]));
+
+        return $content
+            ->header('试卷编辑')
+            ->breadcrumb(
+                ['text' => '试卷管理', 'url' => '/q_and_a'],
+                ['text' => '试卷编辑']
+            )
+            ->body($box);
+    }
+
+    /**
+     * Update the specified resource in storage.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @param  int  $id
+     * @return \Illuminate\Http\Response
+     */
+    public function update(Request $request, $id)
+    {
+        /*
+         * 对试卷 表单进行验证
+         * */
+        $paper_title = $request->input('paper_title','');
+        $paper_title_md5 = md5($paper_title);
+        $paperData = array_merge(
+            $request->all(),
+            ['title_md5'=>$paper_title_md5]
+        );
+        $paperValidator = \Validator::make($paperData,$this->paperRules($id), $this->paperValidationErrorMessages());
+        if ($paperValidator->fails()) {
+            return back()->withErrors($paperValidator)->withInput()->with('paper_active',1);  //返回一次性错误
+        }
+
+        /*
+         * 对问题 表单进行验证
+         * */
+        //基本验证
+        $questionValidator = \Validator::make($request->all(),$this->questionRules(), $this->questionValidationErrorMessages());
+        //自定义验证
+        $questionValidator = $this->customValidate($request,$questionValidator);
+        if ($questionValidator->fails()) {
+            return back()->withErrors($questionValidator)->withInput()->with('question_active',1);  //返回一次性错误
+        }
+
+        /*
+         * 保存修改
+         **/
+        $paperObj = Paper::findOrFail($id);
+
+        //将试卷更新到数据库
+        $paperData = $request->all();
+        $paperData['title'] = $request->input('paper_title');
+        $paperData['title_md5'] = $paper_title_md5;
+        $paperData['introduce'] = $request->input('paper_introduce');
+        $paperData['type'] = $request->input('paper_type',0);
+        $paperData['train_level'] = $request->input('train_level',0);
+        $current_user = \Auth::user();
+        $paperData['updater_id'] = $current_user?$current_user->id:0;
+        try{
+            $res = $paperObj->update($paperData);
+            if(empty($res)){
+                return back()->with('paper_error','试卷更新失败')->withInput();
+            }
+        }catch (\Exception $e){
+            return back()->withInput()->with('paper_error',$e->getMessage());
+        }
+
+        /*
+        *将问题更新到数据库
+        */
+        // 1.先将以前的与该试卷相关的问题全部删掉
+        Question::where('paper_id',intval($id))->delete();
+
+        // 2.插入新的问题
+        $questionData = [];
+        $questionItems = $request->input('question')??[];
+
+        $questionCount = 0; //记录有效题目的数量
+        foreach ($questionItems as $qItem){
+            $questionTitle = $qItem['title'];
+            if(!empty($questionTitle)){
+                $questionCount++;
+                $questionData['paper_id'] = $id;
+                $questionData['title'] = $questionTitle;
+                $questionData['title_md5'] = md5($questionTitle);
+                $questionData['options'] = json_encode($qItem['option']);
+                if(is_array($qItem['right_options'])){//多选题，复选框
+                    $questionData['right_option_keys'] = implode(',',$qItem['right_options']);
+                    $questionData['type'] = 2;
+                }else{//单选题，复选框
+                    $questionData['right_option_keys'] = $qItem['right_options'];
+                    $questionData['type'] = 1;
+                }
+                try{
+                    Question::create($questionData);
+                }catch (\Exception $e){
+                    return back()->withInput()->with('question_error',$e->getMessage());
+                }
+            }
+        }
+
+        //将$questions_count 即：试卷的有效题目的数量 记录到试卷记录中去
+        $paperObj->questions_count = $questionCount;
+        $paperObj->save();
+
+        admin_toastr(trans('admin.update_succeeded'));
+
+        return redirect(route('q_and_a.index'));
+
+    }
+
+    /**
+     * Remove the specified resource from storage.
+     *
+     * @param  int  $id
+     */
+    public function destroy($id)
+    {
+        $id_array = explode(',', $id);
+        foreach ($id_array as $id_term){
+            //删除该试卷 已经 它所有的问题
+            try{
+                $status1 = Paper::where('id',$id_term)->delete();
+                $status2 = Question::where('paper_id',$id_term)->delete();
+            }catch (\Exception $e){
+                return response()->json([
+                    'status'  => false,
+                    'message' => trans('admin.delete_failed'),
+                ]);
+            }
+
+            if($status1 && $status2){
+                $data = [
+                    'status'  => true,
+                    'message' => trans('admin.delete_succeeded'),
+                ];
+            }elseif (!$status1 && $status2){
+                return response()->json([
+                    'status'  => false,
+                    'message' => trans('admin.delete_failed'),
+                ]);
+            }elseif (!$status2 && $status1){
+                $data = [
+                    'status'  => true,
+                    'message' => trans('admin.delete_succeeded'),
+                ]; // return responseError([10000, '删除该试卷对应的问题失败']);
+            }else{
+                return response()->json([
+                    'status'  => false,
+                    'message' => trans('admin.delete_failed'),
+                ]);
+            }
+        }
+        return response()->json($data);
+    }
+
+    /**
+     * Get the password reset validation rules.
+     *
+     * @return array
+     */
+    protected function paperRules($paper_id = 0)
+    {
+        return [
+            'train_level' => 'nullable|integer|min:0|max:100',
+            'paper_type' => 'nullable|integer|min:0|max:100',
+            'can_use_time' => 'required|integer|min:0|max:500',
+            'status' => 'required|integer|between:-1,1',
+            'paper_title' => 'required|string|between:1,1000',
+            'paper_introduce' => 'nullable|string|max:500',
+            'title_md5' => $paper_id
+                ?['required',Rule::unique('q_a_papers')->ignore($paper_id)]
+                :'required|unique:q_a_papers',
+        ];
+    }
+
+    /**
+     * Get the password reset validation error messages.
+     *
+     * @return array
+     */
+    protected function paperValidationErrorMessages()
+    {
+        return [
+            'required'=>'此项必须选择或填写',
+            'string'=>'此项必须为合法的字符',
+            'integer'=>'此项必须为合法的整数',
+            'paper_title.between'=>'试卷标题不得超过 1000 个字符',
+            'status.between'=>'请选择正确的选项',
+            'date'=>'此项必须是日期时间',
+            'max'=>'请选择正确的选项',
+            'can_use_time.max' => '考试时长不能超过500分钟',
+            'paper_introduce.max'=>'试卷简介不能超过500字',
+            'min'=>'请选择选项',
+            'title_md5.unique'=>'此试卷标题已被录入,请勿重复录入',
+        ];
+    }
+
+
+    /**
+     * Get the password reset validation rules.
+     *
+     * @return array
+     */
+    protected function questionRules($paper_id = 0)
+    {
+        $question_options = config('q_and_a.question_option',[]) ;
+        return [
+            'question.*.title' => 'nullable|distinct|string|max:1000',
+            'question.*.right_options' => ['nullable','string',Rule::in($question_options)],
+            'question.*.option.*' => 'nullable|string|max:300',
+        ];
+    }
+
+    /**
+     * Get the password reset validation error messages.
+     *
+     * @return array
+     */
+    protected function questionValidationErrorMessages()
+    {
+        return [
+            'required'=>'此项必须选择或填写',
+            'distinct'=>'问题不得重复录入',
+            'question.*.title.max'=>'问题不得超过 1000 个字符',
+            'question.*.right_options.in'=>'请选择正确的选项',
+            'question.*.option.*.max'=>'选项不得超过 300 个字符',
+        ];
+    }
+
+    /**
+     * 自定义表单验证，用于追加验证问题的相关字段
+     */
+    protected function customValidate(Request $request,Validator $questionValidator){
+        $questionItems = $request['question']??[];
+        $questionValidator->after(function ($questionValidator) use ($questionItems) {
+            foreach ($questionItems as $index => $questionItem) {
+
+                //如果填写了题目内容 title，则要求设置了对应的正确答案
+                $title = $questionItem['title']??'';
+                if(!empty($title)){
+                    if(empty($questionItems[$index]['right_options'])){
+                        $questionValidator->errors()->add('question.'.$index.'.right_options', '请选择正确答案');
+                    }
+                }
+
+                //如果设置了正确答案 right_options,则要求有对应的选项内容，做验证1 ,2  如下；
+                $right_options = $questionItem['right_options']??'';
+                if(!empty($right_options)){
+                    $question_options = config('q_and_a.question_option') ;//问题选项值的设定数组
+
+                    if(is_array($right_options)){//表示是多选
+                        $rightOption = array_pop($right_options);
+                    }else{//表示是单选
+                        $rightOption = $right_options;
+                    }
+
+                    $flag = true; //标示 正确答案不属于选项的前两个，如果属于前两个，则将flag 置为 false;
+
+                    //校验1：至少前2个选项内容必须总是存在
+                    for($i=1;$i<=2;$i++){
+                        $question_option = array_shift($question_options);
+                        if(empty($questionItems[$index]['option'][$question_option])){
+                            $questionValidator->errors()->add('question.'.$index.'.option.'.$question_option, '此选项内容不能为空');
+                        }
+                        if($rightOption == $question_option){
+                            $flag = false;
+                        }
+                    }
+
+                    //校验2：例如 选择了 C 为正确答案，那么 A ,B,C 选项内容都不能为空，D,E,F... 选项不做强制要求。
+                    if($flag){
+                        foreach ($question_options as $question_option){
+                            if(empty($questionItems[$index]['option'][$question_option])){
+                                $questionValidator->errors()->add('question.'.$index.'.option.'.$question_option, '此选项内容不能为空');
+                            }
+                            if($question_option == $rightOption){
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                //如果填写了选项的内容 option ,那么要求填了题目内容title，并且在该选项之前的选项的内容也都不能为空，做校验1，2如下
+                $question_options = config('q_and_a.question_option') ;//问题选项值的设定数组
+                $option = $questionItem['option']??[];
+                $lastIndex = 0;
+                foreach ($option as $option_key => $option_value){
+                    if(!empty($option_value)){
+                        $lastIndex = $option_key;
+                    }
+                }
+                if($lastIndex !== 0){
+                    //校验1：要求与它对应的题目内容不能为空
+                    if(empty($questionItems[$index]['title'])){
+                        $questionValidator->errors()->add('question.'.$index.'.title', '题目内容不能为空-'.$index);
+                    }
+                    foreach ($question_options as $question_option){
+                        //校验2：在该选项之前的选项的内容也不能为空
+                        if(empty($questionItems[$index]['option'][$question_option])){
+                            $questionValidator->errors()->add('question.'.$index.'.option.'.$question_option, '此选项内容不能为空');
+                        }
+
+                        if($question_option == $lastIndex){
+                            break;
+                        }
+                    }
+                }
+
+            }
+        });
+        return $questionValidator;
+    }
+}

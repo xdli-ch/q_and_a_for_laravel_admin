@@ -1,0 +1,34 @@
+{
+    "name": "xdli/q_and_a",
+    "description": "in a exam, create paper-questions-answers extension for laravel-admin . (生成一张问卷(考卷)，包含问题和对应的选项和正确答案。)",
+    "type": "library",
+    "keywords": ["laravel-admin", "extension","question","answer","questions and answers"],
+    "homepage": "https://github.com/xdli/q_and_a",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "xdli 黎贤东",
+            "email": "2538865111@qq.com"
+        }
+    ],
+    "require": {
+        "php": ">=7.0.0",
+        "encore/laravel-admin": "~1.6"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "~6.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Xdli\\Q_And_A\\": "src/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Xdli\\Q_And_A\\Q_And_AServiceProvider"
+            ]
+
+        }
+    }
+}

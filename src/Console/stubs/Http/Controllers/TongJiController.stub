@@ -1,0 +1,84 @@
+<?php
+
+namespace App\Admin\Controllers\Q_And_A;
+
+use Encore\Admin\Layout\Content;
+use Illuminate\Routing\Controller;
+use App\Models\Q_And_A\UserTrain;
+use Encore\Admin\Controllers\HasResourceActions;
+use Encore\Admin\Grid;
+use Encore\Admin\Form;
+use Encore\Admin\Show;
+
+class TongJiController extends Controller
+{
+    use HasResourceActions;
+
+    public function index(Content $content)
+    {
+        return $content
+            ->header('用户答题统计')
+            ->breadcrumb(
+                ['text' => '用户答题统计']
+            )
+            ->body($this->grid());
+    }
+
+    /**
+     * Make a grid builder.
+     *
+     * @return Grid
+     */
+    protected function grid()
+    {
+        $grid = new Grid(new UserTrain);
+
+//        $grid->disableExport();//禁用导出数据按钮
+
+        $grid->id('ID');
+
+        $grid->user()->id('用户ID');
+        $grid->paper()->title('试卷ID');
+        $grid->all_use_time('用时(秒)');
+        $grid->answers('答题详细')->display(function($answers) {
+            return json_encode($answers);
+        });
+        $grid->questions_count('考题数');
+        $grid->right_question_ids('正确回答考题');
+        $grid->right_count('正确回答数');
+        $grid->error_question_ids('错误回答考题');
+        $grid->error_count('错误回答数');
+        $grid->right_ratio('正确率');
+        $grid->created_at('答题时间');
+        $grid->model()->whereHas('user')->orderBy('created_at', 'desc');
+
+        $grid->actions(function ($actions) {
+            $actions->disableEdit();
+            $actions->disableView();
+        });
+
+        $grid->filter(function ($filter) {
+            // 去掉默认的id过滤器
+            $filter->disableIdFilter();
+
+            $filter->column(1/2, function ($filter) {
+                $filter->between('created_at', '答题时间')->datetime();
+            });
+        });
+
+        return $grid;
+    }
+
+    /**
+     * Make a form builder.
+     *
+     * @return Form
+     */
+    protected function form()
+    {
+        $form = new Form(new UserTrain);
+        return $form;
+    }
+
+
+}

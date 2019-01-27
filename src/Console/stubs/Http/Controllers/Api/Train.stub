@@ -1,0 +1,188 @@
+<?php
+
+namespace App\Http\Controllers\Api\Q_And_A;
+
+use Illuminate\Http\Request;
+use App\Http\Controllers\Controller;
+use App\Models\Q_And_A\Paper;
+use App\Models\Q_And_A\Question;
+use App\Models\Q_And_A\UserTrain;
+
+class Train extends Controller
+{
+    //搜索
+    public function search(Request $request){
+        $level = $request->input('level',0);
+        $type = $request->input('type',0);
+        $title = $request->input('title','');
+        $limit = $request->input('limit',20);
+
+        $config_level = array_keys(config('q_and_a.train_level',[]));
+        $config_type = array_keys(config('q_and_a.type',[]));
+
+        if($level){
+            if(!in_array($level,$config_level)){
+                return $this->jsonFailReturn('试卷等级 '.$level.' 不存在');
+            }
+        }
+
+        if($type){
+            if(!in_array($type,$config_type)){
+                return $this->jsonFailReturn('试卷类别 '.$type.' 不存在');
+            }
+        }
+
+        $Paper = Paper::where('status',Paper::ENABLE);
+
+        if($level){
+            $Paper->where('train_level',$level);
+        }
+        if($type){
+            $Paper->where('type',$type);
+        }
+        if($title){
+            $Paper->where('title','like',"%".$title."%");
+        }
+
+        $PaperObj = $Paper->paginate($limit);
+
+        return $this->jsonSuccessReturn($PaperObj?$PaperObj->toArray():[]);
+    }
+
+    //试卷类别
+    public function getType(){
+        $all_type = config('q_and_a.type',[]);
+        return $this->jsonSuccessReturn($all_type);
+    }
+
+    //试卷等级
+    public function getLevel(){
+        $all_level = config('q_and_a.train_level',[]);
+        return $this->jsonSuccessReturn($all_level);
+    }
+
+    //根据试卷 id,得出试卷详细以及相关文档,注意:为了安全考虑，相关问答中不能返回正确的答案
+    public function viewPaper($id=0){
+        if($id){
+            $Paper = Paper::where('id',$id);
+        }else{
+            $Paper = Paper::where('id','>',0);
+        }
+        $PaperObj = $Paper->where('status',Paper::ENABLE)
+            ->with('questions')
+            ->withCount('questions')
+            ->first();
+        if($PaperObj){
+            $res =  $PaperObj->toArray();
+        }else{
+            $res = [];
+        }
+
+        return $this->jsonSuccessReturn($res);
+    }
+
+    //保存 用户的答题详情
+    public function saveUserTrains(Request $request){
+        $user_id = \Auth::user()->id??0;
+        $paper_id = $request->input('paper_id',0);
+        $all_use_time = $request->input('all_use_time',0);//答题用时
+        $right_question_ids = [];
+        $error_question_ids = [];
+        $right_count = 0;
+        $error_count = 0;
+
+        $answers = $request->input('answers','{}');
+        //测试
+        if(0){
+            $paper_id = 1;
+            $answers = '{"78":"a","79":"c","80":"c"}';
+        }
+        $paper_obj = Paper::find($paper_id);
+        if(empty($paper_obj)){
+            return $this->jsonFailReturn('该试卷不存在,试卷id:'.$paper_id);
+        }
+
+        $answers = json_decode($answers,true);
+        $questions_count = $paper_obj->questions_count??0;
+        if($questions_count == 0){
+            return $this->jsonFailReturn('该试卷对应的问题数量异常，试卷id::'.$paper_id);
+        }
+
+        $questions_obj = Question::where('paper_id',$paper_id)->get();
+        foreach ($questions_obj as $questions){
+            if(isset($answers[$questions->id]) && $answers[$questions->id] === $questions->right_option_keys){
+                $right_question_ids[] = $questions->id;
+                $right_count++;
+            }else{
+                $error_question_ids[] = $questions->id;
+                $error_count++;
+            }
+        }
+
+        $data['user_id'] =  $user_id;
+        $data['paper_id'] =  $paper_id;
+        $data['all_use_time'] =  $all_use_time;
+        $data['answers'] =  json_encode($answers);
+        $data['questions_count'] =  $questions_count;
+        $data['right_question_ids'] = json_encode($right_question_ids);
+        $data['error_question_ids'] = json_encode($error_question_ids);
+        $data['right_count'] = $right_count;
+        $data['error_count'] = $error_count;
+        $data['right_ratio'] = round($right_count/$questions_count,4);
+
+        try{
+            $res = UserTrain::create($data);
+        }catch (\Exception $e){
+            return $this->jsonFailReturn('数据保存出错,试卷id:'.$paper_id." ".$e->getMessage());
+        }
+
+        //计算出该用户在本套试题的答题者中的排名
+        $allUserTrain = UserTrain::where('paper_id',$paper_id)
+//            ->whereHas('user',function ($query){$query->where('status',1);})//过滤掉被禁用的用户
+            ->whereHas('user')
+            ->get()
+            ->count();
+        $preUserTrain = UserTrain::where('paper_id',$paper_id)
+//            ->whereHas('user',function ($query){$query->where('status',1);})//过滤掉被禁用的用户
+            ->whereHas('user')
+            ->where('right_ratio','>',$res->right_ratio)
+            ->get()
+            ->count();
+        $res->allUserTrain = $allUserTrain;
+        $res->preUserTrain = $preUserTrain;
+        $res->chaoguonv = (1 -  round($preUserTrain/$allUserTrain,4));
+
+        return $this->jsonSuccessReturn($res->toArray());
+    }
+
+    /**
+     * @param array $data
+     * @param int   $code
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    protected function jsonSuccessReturn($data = [], $code=0 )
+    {
+        return response()->json([
+            'code'    => $code,
+            'message' => 'Success',
+            'data'    => $data,
+        ]);
+    }
+
+    /**
+     * @param string $message
+     * @param int    $code
+     *
+     * @return \Illuminate\Http\JsonResponse
+     */
+    protected function jsonFailReturn($message = '操作失败', $code = -100)
+    {
+        return response()->json([
+            'code' => $code,
+            'message' => $message,
+            'data' => []
+        ]);
+    }
+
+}
